@@ -5,43 +5,54 @@ import { useLoginUser } from "./useLoginUser";
 import { useMessage } from "./useMessage";
 
 export const useAuth = () => {
-  const navigate = useNavigate();
+  // ローディング中の状態管理
   const [loading, setLoading] = useState(false);
-  const {showMessage} = useMessage();
-  const {setLoginUser} = useLoginUser();
+  // トーストなどで画面にメッセージを表示するためのカスタムフック
+  const { showMessage } = useMessage();
+  // ログイン中のユーザー情報をグローバルに保持するためのカスタムフック
+  const { setLoginUser } = useLoginUser();
+  const navigate = useNavigate();
 
-  const login = useCallback((name: string, password: string) => {
-    setLoading(true);
+  // ログイン処理
+  const login = useCallback((name: string, password: string): boolean => {
+      setLoading(true);
+      // ユーザーデータ配列から、入力値に一致するユーザーを検索
+      const user = UserDataSet.find(
+        (u) => u.name === name && u.password === password
+      );
 
-    const user = UserDataSet.find(
-      (u) => u.name === name && u.password === password
-    );
+      // 該当するユーザーがいない場合
+      if (!user) {
+        showMessage({
+          title: "ユーザーIDまたはパスワードが正しくありません",
+          type: "error",
+        });
+        setLoading(false);
+        return false;
+      }
 
-    if (user) {
-      const isAdmin = user.name === "admin" ? true : false;
-      setLoginUser({...user, isAdmin});
+      // ユーザー名が "admin" の場合は管理者フラグ（isAdmin）を true に設定
+      const isAdmin = user.name === "admin";
+      setLoginUser({ ...user, isAdmin });
+
       showMessage({
         title: "ログインしました。",
-        type: "success"
-      })
-      navigate("/todo");
-    } else {
-      showMessage({
-        title: "ユーザーIDまたはパスワードが正しくありません",
-        type: "error"});
-    }
+        type: "success",
+      });
 
-    setLoading(false);
-  }, [navigate, setLoginUser, showMessage]);
+      setLoading(false);
+      return true;
+    },
+    // 依存配列：フック内で使用している外部関数やセッターを指定
+    [setLoginUser, showMessage, setLoading]
+  );
 
-  const logout = useCallback(() => {
+  // ログアウト処理（ユーザー情報をクリアし、ローカルストレージのログインフラグを削除してログイン画面へ強制遷移）
+  const logout = useCallback(() => { 
     setLoginUser(null);
-    showMessage({
-      title: "ログアウトしました",
-      type: "info",
-    });
-    navigate("/");
-  }, [navigate, setLoginUser, showMessage]);
+    localStorage.removeItem("isLoggedIn");
+    navigate("/", { replace: true });
+  }, [setLoginUser, navigate]);
 
   return { login, logout, loading, setLoginUser };
 };

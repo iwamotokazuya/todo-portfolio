@@ -5,7 +5,9 @@ import { useAuth } from "@/hooks/useAuth";
 import { useLoginUser } from "@/hooks/useLoginUser";
 
 export const Header = memo(() => {
+  // ログアウト処理の取得
   const { logout } = useAuth();
+  // 現在ログインしているユーザー情報（loginUser）の取得
   const { loginUser } = useLoginUser();
 
   return (
