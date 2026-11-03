@@ -1,5 +1,23 @@
-import { useState, useMemo, useCallback } from "react";
-import type { Priority, TodoItem, FilterStatus, SortOrder, TodoUpdateFields } from "../types/todo";
+import { useState, useMemo, useCallback, useEffect } from "react";
+import type { Priority, TodoItem, FilterStatus, SortOrder } from "../types/todo";
+import { useLoginUser } from "./useLoginUser";
+import { collection, getDocs, query, Timestamp, where } from "firebase/firestore";
+import { db } from "@/firebase";
+import { useTodoActions } from "./useTodoActions";
+import { useTodoDeletion } from "./useTodoDeletion";
+
+// 優先度の数値と文字列表現の相互変換用マスター定義
+export const PRIORITY_MAP = {
+  high: 1,
+  medium: 2,
+  low: 3,
+} as const;
+
+export const REVERSE_PRIORITY_MAP: Record<number, Priority> = {
+  1: "high",
+  2: "medium",
+  3: "low",
+};
 
 // 本日の日付を "YYYY-MM-DD" 形式の文字列で取得
 export const getTodayString = () => {
@@ -24,7 +42,9 @@ export const isOverdue = (dueDate: string) => {
 };
 
 export const useTodos = () => {
-  const [todos, setTodos] = useState<TodoItem[]>([]);
+  const [todos, setTodos] = useState<(TodoItem & { docId: string })[]>([]);
+  const { loginUser } = useLoginUser();
+  const userId = loginUser?.userId;
 
   // フィルターおよびソートの状態管理
   // active: 未完了, completed: 完了済み, deleted: 削除済み（管理者限定）
@@ -38,6 +58,73 @@ export const useTodos = () => {
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editingTodo, setEditingTodo] = useState<TodoItem | null>(null);
 
+  // 1. ログイン中の user_id に一致する Todo を Firestore から取得
+  useEffect(() => {
+    let cancelled = false;
+    // ユーザーが切り替わった瞬間に古いTODOを即座にクリア
+    setTodos([]);
+    if (userId == null) {
+      return;
+    }
+
+    const fetchTodos = async () => {
+      try {
+        const q = query(collection(db, "todos"), where("user_id", "==", userId));
+        const querySnapshot = await getDocs(q);
+        const fetchedTodos: (TodoItem & { docId: string })[] = [];
+
+        querySnapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          // Firestoreの数値priority（1, 2, 3）をアプリ内の Priority 型 ("high" | "medium" | "low") に変換
+          const priorityVal = typeof data.priority === "number" 
+            ? REVERSE_PRIORITY_MAP[data.priority] || "medium" 
+            : data.priority;
+
+          fetchedTodos.push({
+            docId: docSnap.id,
+            id: data.todo_id,
+            title: data.title,
+            content: data.content,
+            dueDate: data.dueDate,
+            priority: priorityVal,
+            isCompleted: data.isCompleted ?? false,
+            isDeleted: data.isDeleted ?? false,
+            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate().toISOString() : new Date().toISOString(),
+          });
+        });
+
+        if (!cancelled) {
+          setTodos(fetchedTodos);
+        }
+      } catch (error)  {
+        if (!cancelled) {
+          console.error("Todoの取得に失敗しました:", error);
+        }
+      }
+    };
+
+    void fetchTodos();
+
+    return () => {
+      cancelled = true; // アンマウント時やuserId変更時に古いフェッチの結果反映をキャンセル
+    };
+  }, [userId]);
+
+  // アクション系（追加・編集・完了）のフックを呼び出し
+  const { addTodo, updateTodo, completeTodo, restoreTodo } = useTodoActions(
+    userId,
+    todos,
+    setTodos,
+    setIsAddOpen,
+    setEditingTodo
+  );
+
+  // 削除系（論理削除・復元・完全消去）のフックを呼び出し
+  const { softDeleteTodo, restoreFromTrash, hardDeleteTodo } = useTodoDeletion(
+    todos,
+    setTodos
+  );
+
   // フィルター切り替え時にソート順をリセット
   const handleFilterChange = useCallback((status: FilterStatus) => {
     setFilterStatus(status);
@@ -47,102 +134,19 @@ export const useTodos = () => {
 
   // 優先度ソートの切り替え
   const handleSortPriority = useCallback(() => {
-    setPriorityOrder((prev) => {
-      if (prev === null) return "asc";
-      if (prev === "asc") return "desc";
-      return null;
-    });
-  }, []);
+    // 期限日ソートがすでに働いている（nullではない）場合は何もしない
+    if (dueDateOrder !== null) return;
+
+    setPriorityOrder((prev) => (prev === null ? "asc" : prev === "asc" ? "desc" : null));
+  }, [dueDateOrder]);
 
   // 期限ソートの切り替え
   const handleSortDueDate = useCallback(() => {
-    setDueDateOrder((prev) => {
-      if (prev === null) return "asc";
-      if (prev === "asc") return "desc";
-      return null;
-    });
-  }, []);
+    // 優先度ソートがすでに働いている（nullではない）場合は何もしない
+    if (priorityOrder !== null) return;
 
-  // 新規Todoの追加
-  const addTodo = useCallback(
-    (todo: Omit<TodoItem, "id" | "isCompleted" | "createdAt" | "isDeleted">) => {
-      const overdue = isOverdue(todo.dueDate);
-      const nextId = todos.length > 0 ? Math.max(...todos.map((t) => t.id)) + 1 : 1;
-
-      const newTodo: TodoItem = {
-        ...todo,
-        priority: overdue ? "high" : todo.priority,
-        id: nextId,
-        isCompleted: false,
-        isDeleted: false,
-        createdAt: new Date().toISOString(),
-      };
-      setTodos((prev) => [newTodo, ...prev]);
-      setIsAddOpen(false);
-    },
-    [todos]
-  );
-
-  // 既存Todoの更新（引数をTodoUpdateFieldsに絞る）
-  const updateTodo = useCallback((id: number, updatedFields: TodoUpdateFields) => {
-    setTodos((prev) =>
-      prev.map((todo) => {
-        if (todo.id === id) {
-          const merged = { ...todo, ...updatedFields };
-          const overdue = isOverdue(merged.dueDate);
-          return {
-            ...merged,
-            priority: overdue ? "high" : merged.priority,
-          };
-        }
-        return todo;
-      })
-    );
-    setEditingTodo(null);
-  }, []);
-
-  // Todoを完了にする
-  const completeTodo = useCallback((id: number) => {
-    setTodos((prev) =>
-      prev.map((todo) => {
-        if (todo.id === id) {
-          const overdue = isOverdue(todo.dueDate);
-          return {
-            ...todo,
-            priority: overdue ? "high" : todo.priority,
-            isCompleted: true,
-          };
-        }
-        return todo;
-      })
-    );
-  }, []);
-
-  // 完了したTodoを未完了（Active）に差し戻す
-  const restoreTodo = useCallback((id: number) => {
-    setTodos((prev) =>
-      prev.map((todo) => (todo.id === id ? { ...todo, isCompleted: false } : todo))
-    );
-  }, []);
-
-  // Todoをゴミ箱行きにする（論理削除）
-  const softDeleteTodo = useCallback((id: number) => {
-    setTodos((prev) =>
-      prev.map((todo) => (todo.id === id ? { ...todo, isDeleted: true } : todo))
-    );
-  }, []);
-
-  // ゴミ箱にあるタスクを未完了の状態に戻す（復元）
-  const restoreFromTrash = useCallback((id: number) => {
-    setTodos((prev) =>
-      prev.map((todo) => (todo.id === id ? { ...todo, isDeleted: false, isCompleted: false } : todo))
-    );
-  }, []);
-
-  // Todoを配列から完全に削除する（管理者専用の完全消去用）
-  const hardDeleteTodo = useCallback((id: number) => {
-    setTodos((prev) => prev.filter((todo) => todo.id !== id));
-  }, []);
+    setDueDateOrder((prev) => (prev === null ? "asc" : prev === "asc" ? "desc" : null));
+  }, [priorityOrder]);
 
   // フィルター・期限切れによる優先度自動変更・ソートを適用した「表示用Todoリスト」を算出
   const displayedTodos = useMemo(() => {

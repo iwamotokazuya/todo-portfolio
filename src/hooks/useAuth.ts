@@ -1,54 +1,73 @@
-import { UserDataSet } from "../data/userData";
 import { useCallback, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useLoginUser } from "./useLoginUser";
 import { useMessage } from "./useMessage";
+import { collection, query, where, getDocs } from "firebase/firestore";
+import { db } from "../firebase"; 
 
 export const useAuth = () => {
-  // ローディング中の状態管理
   const [loading, setLoading] = useState(false);
-  // トーストなどで画面にメッセージを表示するためのカスタムフック
   const { showMessage } = useMessage();
-  // ログイン中のユーザー情報をグローバルに保持するためのカスタムフック
   const { setLoginUser } = useLoginUser();
   const navigate = useNavigate();
 
-  // ログイン処理
-  const login = useCallback((name: string, password: string): boolean => {
+  const login = useCallback(
+    async (name: string, password: string): Promise<boolean> => {
       setLoading(true);
-      // ユーザーデータ配列から、入力値に一致するユーザーを検索
-      const user = UserDataSet.find(
-        (u) => u.name === name && u.password === password
-      );
 
-      // 該当するユーザーがいない場合
-      if (!user) {
+      try {
+        // Firestoreの users コレクションから name と password が一致するデータを検索
+        const q = query(
+          collection(db, "users"),
+          where("name", "==", name),
+          where("password", "==", password)
+        );
+
+        const querySnapshot = await getDocs(q);
+
+        // 該当するユーザーがいない場合
+        if (querySnapshot.empty) {
+          showMessage({
+            title: "ユーザーIDまたはパスワードが正しくありません",
+            type: "error",
+          });
+          setLoading(false);
+          return false;
+        }
+
+        // 該当したドキュメントからデータを取得
+        const docSnap = querySnapshot.docs[0];
+        const userData = docSnap.data();
+
+        // ユーザー情報をグローバルステートにセット
+        setLoginUser({
+          userId: userData.user_id,
+          name: userData.name,
+          password: userData.password,
+          isAdmin: userData.isAdmin
+        });
+
         showMessage({
-          title: "ユーザーIDまたはパスワードが正しくありません",
+          title: "ログインしました。",
+          type: "success",
+        });
+
+        setLoading(false);
+        return true;
+      } catch (error) {
+        console.error("ログインエラー:", error);
+        showMessage({
+          title: "ログイン処理に失敗しました",
           type: "error",
         });
         setLoading(false);
         return false;
       }
-
-      // ユーザー名が "admin" の場合は管理者フラグ（isAdmin）を true に設定
-      const isAdmin = user.name === "admin";
-      setLoginUser({ ...user, isAdmin });
-
-      showMessage({
-        title: "ログインしました。",
-        type: "success",
-      });
-
-      setLoading(false);
-      return true;
     },
-    // 依存配列：フック内で使用している外部関数やセッターを指定
     [setLoginUser, showMessage, setLoading]
   );
 
-  // ログアウト処理（ユーザー情報をクリアし、ローカルストレージのログインフラグを削除してログイン画面へ強制遷移）
-  const logout = useCallback(() => { 
+  const logout = useCallback(() => {
     setLoginUser(null);
     localStorage.removeItem("isLoggedIn");
     navigate("/", { replace: true });

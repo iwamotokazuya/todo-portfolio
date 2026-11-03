@@ -9,7 +9,7 @@ import { BaseDialog } from "../organisms/BaseDialog";
 type Props = {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (todo: { title: string; content: string; dueDate: string; priority: Priority }, id?: number) => void;
+  onSave: (todo: { title: string; content: string; dueDate: string; priority: Priority }, id?: number) => Promise<boolean>;
   editingTodo?: TodoItem | null;
   isOverdue: (date: string) => boolean;
 };
@@ -49,26 +49,30 @@ export const TodoDialog = ({ isOpen, onClose, onSave, editingTodo, isOverdue }: 
   }, [editingTodo, isOpen]);
 
    // 「登録する」または「変更を保存」ボタンが押されたときの処理
-  const handleAction = () => {
+  const handleAction = async () => {
     if (!title.trim()) return;
-
-    // 新規作成時、または「編集時に日付が変更され、かつ過去の日付に設定された場合」にエラーにする
-    const isDateChanged = editingTodo ? dueDate !== editingTodo.dueDate : true;
-    if (isDateChanged && isOverdue(dueDate)) {
-      setDueDateError("期限は本日以降の日付を指定してください");
-      return;
-    }
 
     // ダイアログが開くたびに前のエラー表示をクリア
     setDueDateError("");
 
+    // 設定されている期限が本日以前ならエラー
+    if (dueDate && isOverdue(dueDate)) {
+      setDueDateError("期限は本日以降の日付を指定してください");
+      return;
+    }
+
+    let success = false;
+
      // 編集モードならIDを添えて保存、新規ならそのまま保存
     if (isEditMode && editingTodo) {
-      onSave({ title, content, dueDate, priority }, editingTodo.id);
+      success = await onSave({ title, content, dueDate, priority }, editingTodo.id);
     } else {
-      onSave({ title, content, dueDate, priority });
+      success = await onSave({ title, content, dueDate, priority });
     }
-    onClose();
+    // 保存処理が成功した（trueが返ってきた）ときだけダイアログを閉じる
+    if (success) {
+      onClose();
+    }
   };
 
   // 重要度選択用のドロップダウンアイテムリスト

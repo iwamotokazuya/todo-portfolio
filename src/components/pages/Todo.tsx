@@ -10,6 +10,7 @@ import { TodoDialog } from "../organisms/TodoDialog";
 import { TodoListTable } from "../organisms/TodoListTable";
 import { TodoDeleteConfirmDialog } from "../organisms/TodoDeleteConfirmDialog";
 import type { FilterStatus, Priority } from "../../types/todo";
+import { toaster } from "../ui/toaster";
 
 // 選択された値が有効な FilterStatus か判定（"deleted" も許可）
 const isFilterStatus = (value: string): value is FilterStatus => {
@@ -33,16 +34,26 @@ export const Todo = memo(() => {
   };
 
   // Todoの保存処理（IDがあれば更新、なければ新規追加）
-  const handleSaveTodo = (
+  const handleSaveTodo = async (
     todoData: { title: string; content: string; dueDate: string; priority: Priority },
     id?: number
-  ) => {
-    if (id !== undefined) {
-      updateTodo(id, todoData);
-    } else {
-      addTodo(todoData);
-    }
-  };
+    ): Promise<boolean> => {
+      try {
+        if (id !== undefined) {
+          await updateTodo(id, todoData);
+        } else {
+          await addTodo(todoData);
+        }
+        return true;
+      } catch (error) {
+        console.error("保存処理に失敗しました:", error);
+        toaster.error({
+                title: "保存処理に失敗しました",
+                description: "時間をおいて再度お試しください。",
+              });
+        return false;
+      }
+    };
 
   // フィルター切り替え用の選択肢リスト（管理者の場合は「削除したタスク」も含める）
   const filterItems = [
