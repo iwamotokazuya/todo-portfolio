@@ -1,13 +1,16 @@
-import { Box, chakra, Container, Heading, Input, Stack, Text } from "@chakra-ui/react";
+import { Box, chakra, Container, Heading, Input, Link, Stack } from "@chakra-ui/react";
 import { useState, type ChangeEvent, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "../atoms/Button";
 import { useAuth } from "../../hooks/useAuth";
+import { CreateUserDialog } from "../organisms/CreateUserDialog";
 
 export const Login = () => {
   // 入力されたユーザー名とパスワードの状態管理
   const [userName, setUserName] = useState("");
   const [password, setPassword] = useState("");
+  // 新規登録ダイアログの開閉ステート
+  const [isCreateUserOpen, setIsCreateUserOpen] = useState(false);
   // 認証ロジック（login関数、通信中フラグloading）の取得
   const { login, loading } = useAuth();
   const navigate = useNavigate();
@@ -80,8 +83,21 @@ export const Login = () => {
           >
             ログイン
           </Button>
+          <Link
+              fontSize="sm"
+              color="teal.600"
+              cursor="pointer"
+              onClick={() => setIsCreateUserOpen(true)}
+              _hover={{ textDecoration: "underline" }}
+            >
+              新規アカウント登録はこちら
+            </Link>
         </Stack>
       </Container>
+      <CreateUserDialog
+        isOpen={isCreateUserOpen}
+        onClose={() => setIsCreateUserOpen(false)}
+      />
     </Box>
   );
 };
