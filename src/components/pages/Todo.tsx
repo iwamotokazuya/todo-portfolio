@@ -11,6 +11,7 @@ import { TodoListTable } from "../organisms/TodoListTable";
 import { TodoDeleteConfirmDialog } from "../organisms/TodoDeleteConfirmDialog";
 import type { FilterStatus, Priority } from "../../types/todo";
 import { toaster } from "../ui/toaster";
+import { useAutoLogout } from "@/hooks/useAutoLogout";
 
 // 選択された値が有効な FilterStatus か判定（"deleted" も許可）
 const isFilterStatus = (value: string): value is FilterStatus => {
@@ -18,6 +19,9 @@ const isFilterStatus = (value: string): value is FilterStatus => {
 };
 
 export const Todo = memo(() => {
+  // 一定時間操作がない場合の自動ログアウトを有効化
+  useAutoLogout();
+  
   // ログイン中のユーザー情報（管理者判定用）を取得
   const { loginUser } = useLoginUser();
 
